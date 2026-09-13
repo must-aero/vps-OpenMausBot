@@ -9,10 +9,11 @@ export const BOT_CALENDAR_DRAG_TYPE = "application/x-openmaus-bot";
 export interface CalendarSidebarProps {
   bots: Bot[];
   anchor: number;
+  timeZone?: string;
   onSelectDate: (at: number) => void;
 }
 
-export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarProps) {
+export function CalendarSidebar({ bots, anchor, timeZone, onSelectDate }: CalendarSidebarProps) {
   const [query, setQuery] = useState("");
   const filteredBots = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -33,7 +34,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
       aria-label="Schedule sidebar"
       className="flex h-full w-[320px] shrink-0 flex-col overflow-hidden border-r border-hairline/40 bg-panel"
     >
-      <MiniMonth anchor={anchor} onSelect={onSelectDate} />
+      <MiniMonth timeZone={timeZone} anchor={anchor} onSelect={onSelectDate} />
 
       <div className="mx-4 border-t border-hairline/40" />
 

@@ -1,3 +1,4 @@
+import { zonedCalendar } from "@/lib/calendar-timezone";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -5,49 +6,52 @@ const WEEKDAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
 
 function startOfMonth(value: number | Date) {
   const date = new Date(value);
-  return new Date(date.getFullYear(), date.getMonth(), 1);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 }
 function sameDay(left: Date, right: Date) {
   return (
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate()
+    left.getUTCFullYear() === right.getUTCFullYear() &&
+    left.getUTCMonth() === right.getUTCMonth() &&
+    left.getUTCDate() === right.getUTCDate()
   );
 }
 
 function moveMonth(date: Date, offset: number) {
-  return new Date(date.getFullYear(), date.getMonth() + offset, 1);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + offset, 1));
 }
 
 export interface MiniMonthProps {
   anchor: number;
+  timeZone?: string;
   onSelect: (at: number) => void;
 }
 
 /** A compact, Monday-first month picker for the calendar sidebar. */
-export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
-  const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(anchor));
+export function MiniMonth({ anchor, onSelect, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: MiniMonthProps) {
+  const zone = useMemo(() => zonedCalendar(timeZone), [timeZone]);
+  const wallAnchor = zone.wall(anchor);
+  const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(wallAnchor));
 
   useEffect(() => {
-    setVisibleMonth(startOfMonth(anchor));
-  }, [anchor]);
+    setVisibleMonth(startOfMonth(wallAnchor));
+  }, [wallAnchor]);
 
   const days = useMemo(() => {
     const first = startOfMonth(visibleMonth);
-    const mondayOffset = (first.getDay() + 6) % 7;
+    const mondayOffset = (first.getUTCDay() + 6) % 7;
     const gridStart = new Date(first);
-    gridStart.setDate(first.getDate() - mondayOffset);
+    gridStart.setUTCDate(first.getUTCDate() - mondayOffset);
 
     return Array.from({ length: 42 }, (_, index) => {
       const date = new Date(gridStart);
-      date.setDate(gridStart.getDate() + index);
+      date.setUTCDate(gridStart.getUTCDate() + index);
       return date;
     });
   }, [visibleMonth]);
 
-  const selected = new Date(anchor);
-  const today = new Date();
-  const monthLabel = visibleMonth.toLocaleDateString(undefined, {
+  const selected = zone.date(anchor);
+  const today = zone.date(Date.now());
+  const monthLabel = visibleMonth.toLocaleDateString(undefined, { timeZone: "UTC",
     month: "long",
     year: "numeric",
   });
@@ -91,8 +95,8 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
         {days.map((date) => {
           const isSelected = sameDay(date, selected);
           const isToday = sameDay(date, today);
-          const isOutsideMonth = date.getMonth() !== visibleMonth.getMonth();
-          const label = date.toLocaleDateString(undefined, {
+          const isOutsideMonth = date.getUTCMonth() !== visibleMonth.getUTCMonth();
+          const label = date.toLocaleDateString(undefined, { timeZone: "UTC",
             weekday: "long",
             month: "long",
             day: "numeric",
@@ -101,9 +105,9 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
 
           return (
             <button
-              key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
+              key={`${date.getUTCFullYear()}-${date.getUTCMonth()}-${date.getUTCDate()}`}
               type="button"
-              onClick={() => onSelect(date.getTime())}
+              onClick={() => onSelect(zone.instant(date.getTime()))}
               aria-label={label}
               aria-current={isToday ? "date" : undefined}
               aria-pressed={isSelected}
@@ -120,7 +124,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
                         : "text-ink-secondary group-hover:bg-raised group-hover:text-ink"
                 }`}
               >
-                {date.getDate()}
+                {date.getUTCDate()}
               </span>
             </button>
           );

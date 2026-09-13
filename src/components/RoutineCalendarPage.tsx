@@ -1,3 +1,4 @@
+import { calendarTimeZone, calendarTimeZoneOptions, zonedCalendar } from "@/lib/calendar-timezone";
 import {
   useCallback,
   useEffect,
@@ -60,7 +61,6 @@ import {
   addDays,
   atLocalTime,
   CALENDAR_SLOT_MINUTES,
-  calendarRangeLabel,
   formatGmtOffset,
   fromLocalDateAndTime,
   intervalAnchorForSave,
@@ -68,9 +68,7 @@ import {
   packCalendarCollisions,
   projectedRoutineItems,
   scheduleAt,
-  slotAt,
   startOfDay,
-  startOfWeek,
   toLocalDateInput,
   toLocalTimeInput,
   type RoutineCalendarItem,
@@ -614,6 +612,7 @@ function EventEditor({
         </div>
 
         <div className="space-y-5 px-5 py-5 sm:px-8">
+          <p className="text-[11px] text-ink-secondary">Schedule editing timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}. The calendar display preference does not change run times.</p>
           {canSwitchKind && (
             <div className="ml-10 inline-flex rounded-lg bg-inset p-1">
               <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-md px-4 py-1.5 text-[12.5px] font-medium", kind === "routine" ? "bg-raised text-ink shadow" : "text-ink-secondary")}>Routine</button>
@@ -1065,7 +1064,7 @@ function QuickComposer({
         )}
         <div className="flex items-start gap-3 text-[12.5px] text-ink">
           <Clock3 size={16} className="mt-0.5 shrink-0 text-ink-secondary" />
-          <div><div>{niceDate(seed.at)}</div><div className="mt-0.5 text-ink-secondary">{niceTime(seed.at)}{kind === "call" ? ` – ${niceTime(seed.at + durationMinutes * 60_000)}` : ""}</div></div>
+          <div><div className="text-ink-secondary">{Intl.DateTimeFormat().resolvedOptions().timeZone}</div><div>{niceDate(seed.at)}</div><div className="mt-0.5 text-ink-secondary">{niceTime(seed.at)}{kind === "call" ? ` – ${niceTime(seed.at + durationMinutes * 60_000)}` : ""}</div></div>
         </div>
         <div className="flex items-start gap-3">
           <UserRoundPlus size={16} className="mt-2.5 shrink-0 text-ink-secondary" />
@@ -1100,6 +1099,7 @@ function QuickComposer({
 
 function CalendarEventCard({
   item,
+  timeZone,
   bots,
   groups,
   compact,
@@ -1108,6 +1108,7 @@ function CalendarEventCard({
   onResize,
 }: {
   item: CalendarEventItem;
+  timeZone: string;
   bots: Bot[];
   groups: Group[];
   compact: boolean;
@@ -1115,6 +1116,7 @@ function CalendarEventCard({
   onOpen: () => void;
   onResize: (minutes: number) => void;
 }) {
+  const zone = useMemo(() => zonedCalendar(timeZone), [timeZone]);
   const isCall = item.kind === "call";
   const routine = item.kind === "routine" ? item.routine : null;
   const run = item.kind === "routine" ? item.run : null;
@@ -1175,7 +1177,7 @@ function CalendarEventCard({
       style={{
         left: `calc(${(layout.column / layout.columns) * 100}% + 2px)`,
         width: `calc(${100 / layout.columns}% - 4px)`,
-        top: `${((new Date(item.at).getHours() * 60 + new Date(item.at).getMinutes()) / 60) * HOUR_HEIGHT}px`,
+        top: `${(zone.minutes(item.at) / 60) * HOUR_HEIGHT}px`,
         height: `${Math.max(16, (previewDuration / 60) * HOUR_HEIGHT)}px`,
         background: `linear-gradient(110deg, color-mix(in srgb, ${color} 58%, #242424), color-mix(in srgb, ${color} 28%, #181818))`,
         borderColor: `color-mix(in srgb, ${color} 70%, transparent)`,
@@ -1185,7 +1187,7 @@ function CalendarEventCard({
         {previewDuration >= 30 && (isCall ? <Video size={compact ? 11 : 13} className="mt-0.5 shrink-0" /> : primary ? <BotAvatar bot={primary} state={status ? statusState(status) : "idle"} size={compact ? 22 : 26} animated={status === "running" || status === "waiting"} /> : null)}
         <div className="min-w-0 flex-1">
           <div className={cn("truncate text-[11px] font-semibold", previewDuration < 30 ? "leading-none" : "leading-tight")}>{name}</div>
-          {previewDuration >= 30 && <div className="mt-0.5 truncate text-[9.5px] text-white/75">{niceTime(item.at)} · {intervalCadence ?? (isCall ? `${ownerBots.length} bot${ownerBots.length === 1 ? "" : "s"}` : isRoomGoal ? `Team goal · ${room?.name ?? "Group"}${statusLabel ? ` · ${statusLabel}` : ""}` : statusLabel ?? primary?.name)}</div>}
+          {previewDuration >= 30 && <div className="mt-0.5 truncate text-[9.5px] text-white/75">{zone.time(item.at)} · {intervalCadence ?? (isCall ? `${ownerBots.length} bot${ownerBots.length === 1 ? "" : "s"}` : isRoomGoal ? `Team goal · ${room?.name ?? "Group"}${statusLabel ? ` · ${statusLabel}` : ""}` : statusLabel ?? primary?.name)}</div>}
         </div>
         {previewDuration >= 30 && ownerBots.length > 1 && <span className="rounded bg-black/20 px-1 py-0.5 text-[8px]">+{ownerBots.length - 1}</span>}
       </div>
@@ -1196,6 +1198,7 @@ function CalendarEventCard({
 
 function CalendarGrid({
   anchor,
+  timeZone,
   days,
   items,
   bots,
@@ -1206,6 +1209,7 @@ function CalendarGrid({
   onResize,
 }: {
   anchor: number;
+  timeZone: string;
   days: number;
   items: CalendarEventItem[];
   bots: Bot[];
@@ -1215,11 +1219,12 @@ function CalendarGrid({
   onMove: (item: { kind: EventKind; id: string; at: number }, nextAt: number) => void;
   onResize: (item: CalendarEventItem, duration: number) => void;
 }) {
+  const zone = useMemo(() => zonedCalendar(timeZone), [timeZone]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<{ day: number; start: number; end: number } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ day: number; at: number } | null>(null);
-  const today = startOfDay(Date.now());
-  const starts = Array.from({ length: days }, (_, index) => addDays(anchor, index));
+  const today = zone.start(Date.now());
+  const starts = Array.from({ length: days }, (_, index) => zone.add(anchor, index));
   const minDayWidth = days === 7 ? 88 : days === 3 ? 180 : 340;
   const gridTemplateColumns = `64px repeat(${days}, minmax(${minDayWidth}px, 1fr))`;
   const minWidth = 64 + days * minDayWidth;
@@ -1227,19 +1232,19 @@ function CalendarGrid({
   useEffect(() => {
     const viewport = scrollRef.current;
     if (!viewport) return;
-    const now = new Date();
-    const hour = starts.includes(today) ? Math.max(0, now.getHours() - 2) : 7;
+    const now = zone.date(Date.now());
+    const hour = starts.includes(today) ? Math.max(0, now.getUTCHours() - 2) : 7;
     viewport.scrollTo({ top: hour * HOUR_HEIGHT });
-  }, [days]);
+  }, [days, timeZone]);
 
   const beginSelection = (event: ReactPointerEvent<HTMLDivElement>, day: number) => {
     if (event.button !== 0 || (event.target as HTMLElement).closest("[data-event-card]")) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    const start = slotAt(day, event.clientY, rect.top, HOUR_HEIGHT);
+    const start = zone.slot(day, event.clientY, rect.top, HOUR_HEIGHT);
     let end = start + 30 * 60_000;
     setSelection({ day, start, end });
     const move = (pointer: PointerEvent) => {
-      const current = slotAt(day, pointer.clientY, rect.top, HOUR_HEIGHT);
+      const current = zone.slot(day, pointer.clientY, rect.top, HOUR_HEIGHT);
       end = Math.max(start + CALENDAR_SLOT_MINUTES * 60_000, current + CALENDAR_SLOT_MINUTES * 60_000);
       setSelection({ day, start, end });
     };
@@ -1257,7 +1262,7 @@ function CalendarGrid({
     event.preventDefault();
     setDragPreview(null);
     const rect = event.currentTarget.getBoundingClientRect();
-    const at = slotAt(day, event.clientY, rect.top, HOUR_HEIGHT);
+    const at = zone.slot(day, event.clientY, rect.top, HOUR_HEIGHT);
     const botId = event.dataTransfer.getData(BOT_DRAG_TYPE);
     if (botId) return onCreate({ kind: "routine", at, durationMinutes: 30, botIds: [botId], anchor: { x: event.clientX, y: event.clientY } });
     const raw = event.dataTransfer.getData(EVENT_DRAG_TYPE);
@@ -1275,18 +1280,18 @@ function CalendarGrid({
     event.preventDefault();
     event.dataTransfer.dropEffect = event.dataTransfer.types.includes(EVENT_DRAG_TYPE) ? "move" : "copy";
     const rect = event.currentTarget.getBoundingClientRect();
-    const at = slotAt(day, event.clientY, rect.top, HOUR_HEIGHT);
+    const at = zone.slot(day, event.clientY, rect.top, HOUR_HEIGHT);
     setDragPreview((current) => current?.day === day && current.at === at ? current : { day, at });
   };
 
   return (
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto border-l border-t border-hairline/40 bg-app">
       <div className="sticky top-0 z-30 grid bg-app/95 backdrop-blur" style={{ gridTemplateColumns, minWidth }}>
-        <div className="border-b border-r border-hairline/40 px-2 py-3 text-center text-[9px] uppercase tracking-wider text-ink-secondary">{formatGmtOffset(-new Date(anchor).getTimezoneOffset())}</div>
+        <div className="border-b border-r border-hairline/40 px-2 py-3 text-center text-[9px] uppercase tracking-wider text-ink-secondary">{formatGmtOffset(zone.offset(anchor))}</div>
         {starts.map((start) => {
-          const date = new Date(start);
+          const date = zone.date(start);
           const isToday = start === today;
-          return <div key={start} role="columnheader" className={cn("border-b border-r border-hairline/40 px-2 py-2 text-center last:border-r-0", isToday && "bg-accent/[0.035]")}><div className={cn("text-[10px] font-medium uppercase tracking-[0.14em]", isToday ? "text-accent" : "text-ink-secondary")}>{DAY_NAMES[date.getDay()]}</div><div className={cn("mx-auto mt-1 flex size-8 items-center justify-center rounded-full text-[15px] font-medium", isToday ? "bg-accent text-white" : "text-ink")}>{date.getDate()}</div></div>;
+          return <div key={start} role="columnheader" className={cn("border-b border-r border-hairline/40 px-2 py-2 text-center last:border-r-0", isToday && "bg-accent/[0.035]")}><div className={cn("text-[10px] font-medium uppercase tracking-[0.14em]", isToday ? "text-accent" : "text-ink-secondary")}>{DAY_NAMES[date.getUTCDay()]}</div><div className={cn("mx-auto mt-1 flex size-8 items-center justify-center rounded-full text-[15px] font-medium", isToday ? "bg-accent text-white" : "text-ink")}>{date.getUTCDate()}</div></div>;
         })}
       </div>
       <div role="grid" aria-label="Routine and call calendar" onDragEnd={() => setDragPreview(null)} className="relative grid" style={{ height: HOUR_HEIGHT * 24, gridTemplateColumns, minWidth }}>
@@ -1294,19 +1299,19 @@ function CalendarGrid({
           {Array.from({ length: 24 }, (_, hour) => <div key={hour} className="absolute right-2 -translate-y-1/2 text-[9.5px] tabular-nums text-ink-secondary/70" style={{ top: hour * HOUR_HEIGHT }}>{hour === 0 ? "" : new Date(2000, 0, 1, hour).toLocaleTimeString([], { hour: "numeric" })}</div>)}
         </div>
         {starts.map((start) => {
-          const now = new Date();
-          const nowTop = ((now.getHours() * 60 + now.getMinutes()) / 60) * HOUR_HEIGHT;
-          const dayItems = items.filter((item) => startOfDay(item.at) === start);
+          const now = zone.date(Date.now());
+          const nowTop = ((now.getUTCHours() * 60 + now.getUTCMinutes()) / 60) * HOUR_HEIGHT;
+          const dayItems = items.filter((item) => zone.start(item.at) === start);
           const collisionLayouts = packCalendarCollisions(dayItems);
           const selected = selection?.day === start ? selection : null;
           const preview = dragPreview?.day === start ? dragPreview : null;
           return (
-            <div key={start} role="gridcell" aria-label={`${niceDate(start)} calendar`} onPointerDown={(event) => beginSelection(event, start)} onDragOver={(event) => previewDrop(event, start)} onDragLeave={(event) => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragPreview(null); }} onDrop={(event) => drop(event, start)} className={cn("relative border-r border-hairline/40 last:border-r-0", start === today && "bg-accent/[0.025]")}>
+            <div key={start} role="gridcell" aria-label={`${zone.label(start)} calendar`} onPointerDown={(event) => beginSelection(event, start)} onDragOver={(event) => previewDrop(event, start)} onDragLeave={(event) => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDragPreview(null); }} onDrop={(event) => drop(event, start)} className={cn("relative border-r border-hairline/40 last:border-r-0", start === today && "bg-accent/[0.025]")}>
               {Array.from({ length: 48 }, (_, half) => <div key={half} className={cn("pointer-events-none absolute inset-x-0 border-t", half % 2 === 0 ? "border-hairline/30" : "border-hairline/10")} style={{ top: (half / 2) * HOUR_HEIGHT }} />)}
               {start === today && <div className="pointer-events-none absolute inset-x-0 z-20 flex items-center" style={{ top: nowTop }}><span className="-ml-1 size-2 rounded-full bg-danger" /><span className="h-px flex-1 bg-danger/80" /></div>}
-              {selected && <div className="pointer-events-none absolute inset-x-1 z-10 rounded-md border border-accent/70 bg-accent/20" style={{ top: ((new Date(selected.start).getHours() * 60 + new Date(selected.start).getMinutes()) / 60) * HOUR_HEIGHT, height: Math.max(16, ((selected.end - selected.start) / 3_600_000) * HOUR_HEIGHT) }} />}
-              {preview && <div className="pointer-events-none absolute inset-x-1 z-20 rounded-md border border-accent/80 bg-accent/25 shadow-sm" style={{ top: ((new Date(preview.at).getHours() * 60 + new Date(preview.at).getMinutes()) / 60) * HOUR_HEIGHT, height: HOUR_HEIGHT / 2 }}><div className="px-2 py-1 text-[9.5px] font-medium text-accent">{niceTime(preview.at)}</div></div>}
-              {dayItems.map((item) => <CalendarEventCard key={item.id} item={item} bots={bots} groups={groups} compact={days === 7} layout={collisionLayouts.get(item.id) ?? { column: 0, columns: 1 }} onOpen={() => onOpen(item)} onResize={(minutes) => onResize(item, minutes)} />)}
+              {selected && <div className="pointer-events-none absolute inset-x-1 z-10 rounded-md border border-accent/70 bg-accent/20" style={{ top: (zone.minutes(selected.start) / 60) * HOUR_HEIGHT, height: Math.max(16, ((selected.end - selected.start) / 3_600_000) * HOUR_HEIGHT) }} />}
+              {preview && <div className="pointer-events-none absolute inset-x-1 z-20 rounded-md border border-accent/80 bg-accent/25 shadow-sm" style={{ top: (zone.minutes(preview.at) / 60) * HOUR_HEIGHT, height: HOUR_HEIGHT / 2 }}><div className="px-2 py-1 text-[9.5px] font-medium text-accent">{zone.time(preview.at)}</div></div>}
+              {dayItems.map((item) => <CalendarEventCard timeZone={timeZone} key={item.id} item={item} bots={bots} groups={groups} compact={days === 7} layout={collisionLayouts.get(item.id) ?? { column: 0, columns: 1 }} onOpen={() => onOpen(item)} onResize={(minutes) => onResize(item, minutes)} />)}
             </div>
           );
         })}
@@ -1317,6 +1322,7 @@ function CalendarGrid({
 
 export function EventDetails({
   item,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
   bots,
   onClose,
   onEdit,
@@ -1324,12 +1330,14 @@ export function EventDetails({
   onOpenRoom,
 }: {
   item: CalendarEventItem;
+  timeZone?: string;
   bots: Bot[];
   onClose: () => void;
   onEdit: () => void;
   onCallChanged: (id: string | null) => void;
   onOpenRoom: (id: string) => void;
 }) {
+  const zone = useMemo(() => zonedCalendar(timeZone), [timeZone]);
   const { state, dispatch } = useStore();
   const [working, setWorking] = useState(false);
   const runNowPending = useRef(false);
@@ -1434,7 +1442,7 @@ export function EventDetails({
           <div className="min-w-0 flex-1">
             <div className="text-[19px] font-semibold text-ink">{title}</div>
             <div className="mt-1 text-[12.5px] text-ink-secondary">
-              {niceDate(item.at)} · {niceTime(item.at)}{isCall ? ` – ${niceTime(item.at + item.durationMinutes * 60_000)}` : ""}
+              {zone.label(item.at)} · {zone.time(item.at)}{isCall ? ` – ${zone.time(item.at + item.durationMinutes * 60_000)}` : ""}
             </div>
             {(routine || call) && <div className="mt-1 text-[11.5px] text-ink-secondary">{scheduleLabel((routine ?? call)!.schedule)}</div>}
           </div>
@@ -1560,13 +1568,33 @@ export function RoutineEditor({
 export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpenRoom: (id: string) => void }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
+  const [preferenceKey, setPreferenceKey] = useState<string | null>(null);
+  const [zonePreference, setZonePreference] = useState("");
+  useEffect(() => {
+    let active = true;
+    void api("/api/auth/session").then(session => {
+      if (!active) return;
+      const key = `omb-calendar-timezone:${session.environmentId || location.host}:${session.email || session.id || "local"}`;
+      setPreferenceKey(key);
+      try { setZonePreference(localStorage.getItem(key) || ""); } catch { setZonePreference(""); }
+    }).catch(() => { /* Default to the device timezone until identity is available. */ });
+    return () => { active = false; };
+  }, []);
+  const timeZone = calendarTimeZone(zonePreference);
+  const zone = useMemo(() => zonedCalendar(timeZone), [timeZone]);
+  const timeZones = useMemo(() => calendarTimeZoneOptions(timeZone), [timeZone]);
+  const changeTimeZone = (value: string) => {
+    setZonePreference(value);
+    try { preferenceKey && localStorage.setItem(preferenceKey, value); } catch { /* This session still uses the selection. */ }
+  };
+
   const routinesOnly = window.ogb?.remoteClient?.active === true;
   const backButtonRef = useRef<HTMLButtonElement>(null);
   const newMenuRef = useRef<HTMLDetailsElement>(null);
   const [section, setSection] = useState<"calendar" | "logs" | "webhooks">(state.routinesFocus?.section === "logs" ? "logs" : "calendar");
   const [scheduleView, setScheduleView] = useState<"calendar" | "list">(state.routinesFocus?.view ?? "calendar");
   const [viewDays, setViewDays] = useState<1 | 3 | 7>(7);
-  const [anchor, setAnchor] = useState(() => startOfDay(Date.now()));
+  const [anchor, setAnchor] = useState(() => Date.now());
   const [botFilter, setBotFilter] = useState(state.routinesFocus?.botId ?? "all");
   const [routineFilter, setRoutineFilter] = useState<string | undefined>(state.routinesFocus?.routineId);
   const [calls, setCalls] = useState<CalendarCall[]>([]);
@@ -1577,8 +1605,8 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const [webhookCreateRequest, setWebhookCreateRequest] = useState(0);
   const [error, setError] = useState("");
   const visibleBots = state.bots.filter((bot) => !bot.hidden);
-  const rangeStart = viewDays === 7 ? startOfWeek(anchor) : startOfDay(anchor);
-  const rangeEnd = addDays(rangeStart, viewDays);
+  const rangeStart = viewDays === 7 ? zone.week(anchor) : zone.start(anchor);
+  const rangeEnd = zone.add(rangeStart, viewDays);
 
   useEffect(() => {
     const focus = state.routinesFocus;
@@ -1647,9 +1675,9 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
 
   const setView = (days: 1 | 3 | 7) => {
     setViewDays(days);
-    setAnchor((current) => startOfDay(current));
+    setAnchor((current) => zone.start(current));
   };
-  const goToday = useCallback(() => setAnchor(startOfDay(Date.now())), []);
+  const goToday = useCallback(() => setAnchor(Date.now()), []);
   const handleWebhookCreateHandled = useCallback(() => setWebhookCreateRequest(0), []);
   const openCreate = useCallback((seed?: Partial<EventSeed>) => {
     setSelected(null);
@@ -1757,11 +1785,12 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
             <button type="button" aria-pressed={scheduleView === "calendar"} onClick={() => setScheduleView("calendar")} className={cn("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px]", scheduleView === "calendar" ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink")}><CalendarDays size={13} />Calendar</button>
           </div>}
           {section === "calendar" && scheduleView === "calendar" && <><div className="flex items-center rounded-lg border border-hairline/50 bg-panel p-0.5">
-            <button onClick={() => setAnchor((current) => addDays(current, -viewDays))} className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink" aria-label="Previous dates"><ChevronLeft size={16} /></button>
+            <button onClick={() => setAnchor((current) => zone.add(current, -viewDays))} className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink" aria-label="Previous dates"><ChevronLeft size={16} /></button>
             <button onClick={goToday} className="rounded-md px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-raised">Today</button>
-            <button onClick={() => setAnchor((current) => addDays(current, viewDays))} className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink" aria-label="Next dates"><ChevronRight size={16} /></button>
+            <button onClick={() => setAnchor((current) => zone.add(current, viewDays))} className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink" aria-label="Next dates"><ChevronRight size={16} /></button>
           </div>
-          <div className="min-w-[220px] px-2 text-[15px] font-medium text-ink">{calendarRangeLabel(rangeStart, viewDays)}</div></>}
+          <div className="min-w-[220px] px-2 text-[15px] font-medium text-ink">{zone.range(rangeStart, viewDays)}</div></>}
+          {section === "calendar" && scheduleView === "calendar" && <label className="flex items-center gap-2 text-[11px] text-ink-secondary">Timezone<select aria-label="Calendar timezone" disabled={!preferenceKey} title="Display timezone for your account in this browser. Run times stay unchanged." value={zonePreference ? timeZone : ""} onChange={event => changeTimeZone(event.target.value)} className="max-w-[210px] rounded-lg border border-hairline/50 bg-panel px-2.5 py-2 text-ink"><option value="">🌐 Automatic</option>{timeZones.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select></label>}
           <div className="ml-auto flex items-center gap-2">
             {running > 0 && <span className="hidden items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1.5 text-[10.5px] text-accent sm:flex"><Loader2 size={11} className="animate-spin" />{running} active</span>}
             {unseenFailures > 0 && <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "logs" })} className="hidden items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1.5 text-[10.5px] text-danger sm:flex" title="Open failed run logs" aria-label="Open failed run logs"><CircleAlert size={11} />{unseenFailures}</button>}
@@ -1785,14 +1814,14 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
         </div></div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          <div className="hidden shrink-0 lg:block"><CalendarSidebar bots={visibleBots} anchor={anchor} onSelectDate={(at) => setAnchor(startOfDay(at))} /></div>
-          <CalendarGrid anchor={rangeStart} days={viewDays} items={items} bots={state.bots} groups={state.groups} onOpen={(item) => { setSelected(item); if (item.kind === "routine" && item.run && ["failed", "missed"].includes(item.run.status) && !item.run.seenAt) dispatch({ type: "markRoutineRunSeen", runId: item.run.id }); }} onCreate={openCreate} onMove={(item, at) => void moveEvent(item, at)} onResize={(item, duration) => void resizeEvent(item, duration)} />
+          <div className="hidden shrink-0 lg:block"><CalendarSidebar timeZone={timeZone} bots={visibleBots} anchor={anchor} onSelectDate={setAnchor} /></div>
+          <CalendarGrid timeZone={timeZone} anchor={rangeStart} days={viewDays} items={items} bots={state.bots} groups={state.groups} onOpen={(item) => { setSelected(item); if (item.kind === "routine" && item.run && ["failed", "missed"].includes(item.run.status) && !item.run.seenAt) dispatch({ type: "markRoutineRunSeen", runId: item.run.id }); }} onCreate={openCreate} onMove={(item, at) => void moveEvent(item, at)} onResize={(item, duration) => void resizeEvent(item, duration)} />
         </div>
       )}
 
       {quick && <><div className="fixed inset-0 z-40 bg-black/25" onMouseDown={() => setQuick(null)} /><QuickComposer seed={quick} bots={visibleBots} routinesOnly={routinesOnly} onClose={() => setQuick(null)} onMore={(seed) => { setQuick(null); setEditor(seed); }} onSavedRoutine={(routine) => dispatch({ type: "routinePatched", routine })} onSavedCall={upsertCall} /></>}
       {editor && <EventEditor seed={editor} bots={visibleBots} routinesOnly={routinesOnly} onClose={() => setEditor(null)} onSavedCall={upsertCall} />}
-      {liveSelected && <EventDetails item={liveSelected} bots={state.bots} onClose={() => setSelected(null)} onEdit={() => { const seed: EventSeed = liveSelected.kind === "call" ? { kind: "call", at: liveSelected.at, durationMinutes: liveSelected.call.durationMinutes, botIds: liveSelected.call.botIds, call: liveSelected.call } : { kind: "routine", at: liveSelected.at, durationMinutes: liveSelected.routine?.durationMinutes ?? liveSelected.run?.durationMinutes ?? 30, botIds: [liveSelected.routine?.botId ?? liveSelected.run?.botId ?? ""].filter(Boolean), routine: liveSelected.routine ?? undefined }; setSelected(null); setEditor(seed); }} onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} onOpenRoom={onOpenRoom} />}
+      {liveSelected && <EventDetails timeZone={timeZone} item={liveSelected} bots={state.bots} onClose={() => setSelected(null)} onEdit={() => { const seed: EventSeed = liveSelected.kind === "call" ? { kind: "call", at: liveSelected.at, durationMinutes: liveSelected.call.durationMinutes, botIds: liveSelected.call.botIds, call: liveSelected.call } : { kind: "routine", at: liveSelected.at, durationMinutes: liveSelected.routine?.durationMinutes ?? liveSelected.run?.durationMinutes ?? 30, botIds: [liveSelected.routine?.botId ?? liveSelected.run?.botId ?? ""].filter(Boolean), routine: liveSelected.routine ?? undefined }; setSelected(null); setEditor(seed); }} onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} onOpenRoom={onOpenRoom} />}
       {pausedOpen && <PausedList routines={paused} bots={state.bots} groups={state.groups} onClose={() => setPausedOpen(false)} onEdit={(routine) => { setPausedOpen(false); const at = routine.schedule.type === "once" ? routine.schedule.at : routine.schedule.type === "interval" ? routine.schedule.anchorAt : atLocalTime(Date.now(), routine.schedule.time); setEditor({ kind: "routine", at, durationMinutes: routine.durationMinutes, botIds: [routine.botId], routine }); }} onOpenRoom={onOpenRoom} />}
     </main>
   );
