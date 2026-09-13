@@ -67,6 +67,7 @@ describe("t", () => {
     expect(resolveLocale("zh-Hant-TW", available)).toBe("zh-hant");
     expect(resolveLocale("zh-HK", available)).toBe("zh-hk");
     expect(resolveLocale("ja-JP", available)).toBe("ja");
+    expect(resolveLocale("ko-KR", available)).toBe("ko");
     expect(resolveLocale("pt-BR", available)).toBe("pt-br");
     expect(resolveLocale("pt-PT", available)).toBe("pt");
     expect(resolveLocale("hi-IN", available)).toBe("hi");
@@ -89,6 +90,14 @@ describe("t", () => {
         expect(pack[key], `${code}: ${key}`).not.toBe(en[key]);
       }
     }
+  });
+
+  it("ships a complete Korean pack and interpolates Korean copy", () => {
+    expect(Object.keys(locales.ko).sort()).toEqual(Object.keys(en).sort());
+    expect(setLocale("ko-KR")).toBe("ko");
+    expect(t("settings.language.title")).toBe("언어");
+    expect(t("team.moveTo", { name: "Research" })).toContain("Research");
+    expect(t("team.moveTo", { name: "Research" })).not.toContain("{name}");
   });
 
   it("ships exactly one JSON catalog for every picker language", () => {
