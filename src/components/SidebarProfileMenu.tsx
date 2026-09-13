@@ -27,10 +27,10 @@ import { AboutDialog } from "./AboutDialog";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { ShortcutHint } from "./ShortcutHint";
 import { phoneSettingsAction, useSidebarPhoneStatus } from "./SidebarPhoneButton";
-import { useStore } from "@/state/store";
+import { api, useStore, type ConfigStatus } from "@/state/store";
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
 
 /** "Milind Soni" → "MS", "milind" → "M", "you@x.dev" → "Y", unset → "?" */
@@ -194,6 +194,25 @@ export function SidebarProfileMenu() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const triggerRef = useRef<HTMLSpanElement>(null);
 
+  const [languageSaving, setLanguageSaving] = useState(false);
+  const [languageError, setLanguageError] = useState("");
+  const saveLanguage = async (language: string) => {
+    if (languageSaving) return;
+    setLanguageSaving(true);
+    setLanguageError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ language }),
+      });
+      dispatch({ type: "configStatus", config });
+    } catch {
+      setLanguageError(t("settings.language.error"));
+    } finally {
+      setLanguageSaving(false);
+    }
+  };
+
   const profile = state.config?.profile;
   const name = profileLabel(profile);
 
@@ -248,7 +267,7 @@ export function SidebarProfileMenu() {
   ];
 
   return (
-    <>
+    <div className="relative">
       <SidebarPopoverMenu
         items={items}
         ariaLabel={name}
@@ -256,7 +275,7 @@ export function SidebarProfileMenu() {
           <span
             ref={triggerRef}
             className={cn(
-              "flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+              "flex min-h-10 w-full items-center gap-2 rounded-xl py-2 pl-3 pr-[128px] text-left transition-colors",
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
@@ -279,7 +298,23 @@ export function SidebarProfileMenu() {
           </span>
         )}
       />
+      <div role="group" aria-label={t("settings.language.aria")} className="absolute right-2 top-1 flex rounded-lg border border-hairline/50 bg-inset p-0.5">
+        {[{ code: "en", label: "English" }, { code: "ko", label: "한국어" }].map(({ code, label }) => (
+          <button
+            key={code}
+            type="button"
+            lang={code}
+            aria-pressed={activeLocale() === code}
+            disabled={languageSaving || !state.config}
+            onClick={() => void saveLanguage(code)}
+            className={cn("min-h-8 rounded-md px-2 text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-50", activeLocale() === code ? "bg-raised text-ink shadow-sm" : "text-muted hover:text-ink")}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {languageError && <p role="alert" className="px-3 text-xs text-danger">{languageError}</p>}
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
-    </>
+    </div>
   );
 }
