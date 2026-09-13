@@ -89,6 +89,7 @@ import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { ShortcutHint } from "./ShortcutHint";
 
 const SECTION_LABEL_KEYS: Record<string, LocaleKey> = {
   [PINNED_SECTION_ID]: "sidebar.section.pinned",
@@ -1593,14 +1594,18 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   const macInset = capabilities.windowChrome === "mac-inset";
   const browser = capabilities.host.label === "Browser";
+  // macOS owns inset traffic lights; Windows hides the native bar and draws
+  // caption buttons over the header's right end. Either way this top row is
+  // the window's drag handle (ChatView/GroupView headers do the same).
+  const draggableChrome = macInset || capabilities.windowChrome === "win-caption";
   // SAFETY: Electron's documented -webkit-app-region CSS property is not in
   // React's CSSProperties type, but the renderer accepts it as an inline style.
-  const windowDragStyle = macInset
+  const windowDragStyle = draggableChrome
     ? ({ WebkitAppRegion: "drag" } as React.CSSProperties)
     : undefined;
   // SAFETY: Same Electron-only CSS property as windowDragStyle; interactive
   // buttons must explicitly opt out of the draggable title-bar region.
-  const windowNoDragStyle = macInset
+  const windowNoDragStyle = draggableChrome
     ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties)
     : undefined;
 
@@ -1832,7 +1837,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             <>
               <div className="fixed inset-0 z-30" onMouseDown={() => setPlusOpen(false)} />
               <div className={cn(
-                "absolute top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
+                "absolute top-full z-40 mt-1 w-52 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
                 density === "icons" ? "left-0" : "right-0",
               )}>
                 <button
@@ -1843,7 +1848,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
                   <BotIcon size={16} className="text-ink-secondary" />
-                  {t("sidebar.newBot")}
+                  <span className="flex-1">{t("sidebar.newBot")}</span>
+                  <ShortcutHint id="new-bot" />
                 </button>
                 <button
                   onClick={() => {

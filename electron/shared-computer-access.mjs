@@ -9,7 +9,52 @@ import { spawn } from "node:child_process";
 import readline from "node:readline";
 
 const LIMIT = 256 * 1024;
+const PROTECTED = "Desktop credentials and sharing settings cannot be accessed through a shared folder";
 const hash = data => createHash("sha256").update(data).digest("hex");
+const absent = error => error.code === "ENOENT" || error.code === "ENOTDIR";
+const identify = async candidate => { const info = await fs.stat(candidate, { bigint: true }); return `${info.dev}:${info.ino}`; };
+
+/** Protected roots as filesystem identities. A case-insensitive volume, a
+ * Unicode normalization, a macOS firmlink and a Windows 8.3 or UNC name all
+ * spell one directory several ways, so containment is decided by {dev, ino}
+ * and never by comparing path text. A root a fresh install has not created
+ * yet protects nothing, so a missing path is skipped rather than thrown. */
+async function protectedIdentities(roots) {
+  const identities = new Set();
+  for (const root of roots ?? []) {
+    if (typeof root !== "string" || !root) continue;
+    try { identities.add(await identify(await fs.realpath(root))); }
+    catch (error) { if (!absent(error)) throw error; }
+  }
+  return identities;
+}
+
+/** Refuse anything the operating system resolves inside a protected root. A
+ * write may create a file that does not exist yet, so fall back to the nearest
+ * existing ancestor, then walk that resolved chain comparing identities. */
+async function assertOutsideProtected(identities, target) {
+  if (!identities.size) return;
+  let current = path.resolve(target);
+  for (;;) {
+    try { current = await fs.realpath(current); break; }
+    catch (error) {
+      if (!absent(error)) throw error;
+      const parent = path.dirname(current);
+      if (parent === current) return;
+      current = parent;
+    }
+  }
+  for (;;) {
+    let identity;
+    try { identity = await identify(current); }
+    catch (error) { if (!absent(error)) throw error; }
+    if (identity !== undefined && identities.has(identity)) throw new Error(PROTECTED);
+    const parent = path.dirname(current);
+    if (parent === current) return;
+    current = parent;
+  }
+}
+
 const text = value => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
 export const sharedComputerError = error => ({ ...text(error?.message ?? "Computer action failed"), isError: true });
 
@@ -43,9 +88,19 @@ export function sharedCommand(command, cwd, signal) {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const windows = process.platform === "win32";
-    const child = spawn(windows ? "powershell.exe" : "/bin/sh", windows ? ["-NoProfile", "-NonInteractive", "-Command", command] : ["-c", command], {
+    // Windows PowerShell searches registered third-party modules before its
+    // own cmdlets. On a cold machine even `echo` can spend the entire deadline
+    // discovering Write-Output. Prioritize built-ins after startup constructs
+    // the path, preserving every existing module location. A child CLI executes
+    // the original text unchanged: a ScriptBlock wrapper loses native failure
+    // status. The existing process-tree cancellation covers both shells.
+    const script = windows
+      ? `$env:PSModulePath = "$PSHOME\\Modules;$env:PSModulePath"; & "$PSHOME\\powershell.exe" -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand '${Buffer.from(command, "utf16le").toString("base64")}'; exit $LASTEXITCODE`
+      : command;
+    const child = spawn(windows ? "powershell.exe" : "/bin/sh", windows ? ["-NoProfile", "-NonInteractive", "-Command", script] : ["-c", script], {
       cwd, detached: !windows, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
-      env: Object.fromEntries(["PATH", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]])),
+      // Without PATHEXT, PowerShell treats even .exe files as documents.
+      env: Object.fromEntries(["PATH", "PATHEXT", "HOME", "USERPROFILE", "SystemRoot", "TEMP", "TMP", "LANG"].filter(key => process.env[key]).map(key => [key, process.env[key]])),
     });
     const chunks = []; let bytes = 0; let reason;
     const stop = message => { reason = message; killTree(child); };
@@ -122,10 +177,8 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
   const folder = grant.folders.find(entry => entry.id === operation.folder_id);
   if (!folder) throw new Error("This folder has not been shared with this workspace");
   const target = await sharedPath(folder, operation.path);
-  for (const root of grant.protectedPaths ?? []) {
-    const relative = path.relative(root, target);
-    if (relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))) throw new Error("Desktop credentials and sharing settings cannot be accessed through a shared folder");
-  }
+  const protectedRoots = await protectedIdentities(grant.protectedPaths);
+  await assertOutsideProtected(protectedRoots, target);
   signal.throwIfAborted();
   if (operation.action === "list_files") {
     const entries = await fs.readdir(target, { withFileTypes: true });
@@ -142,11 +195,15 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
   const flags = (write ? operation.expected_sha256 ? constants.O_RDWR : constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL : constants.O_RDONLY) | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
   const file = await fs.open(target, flags, 0o600);
   try {
-    const stat = await file.stat();
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size > LIMIT) throw new Error("Only regular, single-link files up to 256 KiB can be shared");
+    const stat = await file.stat({ bigint: true });
+    if (!stat.isFile() || stat.nlink !== 1n || stat.size > LIMIT) throw new Error("Only regular, single-link files up to 256 KiB can be shared");
     await sharedPath(folder, operation.path);
-    const named = await fs.lstat(target);
+    const named = await fs.lstat(target, { bigint: true });
     if (named.ino !== stat.ino || named.dev !== stat.dev || named.isSymbolicLink()) throw new Error("The file changed while opening it; retry after inspecting the folder");
+    // The descriptor, not the spelling, is what the rest of this call reads and
+    // writes, so re-decide containment against its own identity and ancestry.
+    if (protectedRoots.has(`${stat.dev}:${stat.ino}`)) throw new Error(PROTECTED);
+    await assertOutsideProtected(protectedRoots, target);
     let current = Buffer.alloc(0);
     if (!write || operation.expected_sha256) {
       const buffer = Buffer.alloc(LIMIT + 1);

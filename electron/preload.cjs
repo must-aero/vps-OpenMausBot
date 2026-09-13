@@ -104,6 +104,13 @@ const bridge = {
     ipcRenderer.on("speech:end", handler);
     return () => ipcRenderer.removeListener("speech:end", handler);
   },
+  /** The app menu's Preferences… item; local shell only (the remote-safe
+   * subset never sees it). */
+  onOpenAppSettings: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on("app:open-settings", handler);
+    return () => ipcRenderer.removeListener("app:open-settings", handler);
+  },
   /** Absolute path of a dropped File — Electron 32 removed File.path, and
    * only the preload can ask. "" when the drag carried no file on disk. */
   getPathForFile: (file) => {
@@ -131,6 +138,19 @@ const bridge = {
   /** Tell the window which skin the page wears, so the native chrome the
    * renderer cannot paint (the Windows caption-button overlay) matches. */
   applySkin: (skin) => ipcRenderer.invoke("desktop:skin", skin),
+  /** The renderer-drawn Windows caption buttons: minimize / restore /
+   * maximize / close, plus live maximize state so the glyph can flip. */
+  windowControls: {
+    minimize: () => ipcRenderer.invoke("window:minimize"),
+    toggleMaximize: () => ipcRenderer.invoke("window:toggle-maximize"),
+    close: () => ipcRenderer.invoke("window:close"),
+    state: () => ipcRenderer.invoke("window:state"),
+    onMaximizedChanged: (cb) => {
+      const handler = (_event, maximized) => cb(maximized);
+      ipcRenderer.on("window:maximized-changed", handler);
+      return () => ipcRenderer.removeListener("window:maximized-changed", handler);
+    },
+  },
   /** A reviewed BotMRR package opened through openmausbot://install. */
   onPackageInstall: (cb) => {
     packageInstallListeners.add(cb);
